@@ -12,6 +12,12 @@ import (
 
 type networkPoliciesType struct {
 	Policies networkPoliciesSlice `tfsdk:"policies"`
+
+	AppId       types.String `tfsdk:"app_id"`
+	TargetAppId types.String `tfsdk:"target_app_id"`
+	FromPort    types.Int64  `tfsdk:"from_port"`
+	ToPort      types.Int64  `tfsdk:"to_port"`
+	IPProtocol  types.String `tfsdk:"ip_protocol"`
 }
 
 type networkPoliciesSlice []networkPolicyType

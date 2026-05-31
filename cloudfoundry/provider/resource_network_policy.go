@@ -60,30 +60,30 @@ func (r *NetworkPolicyResource) Schema(ctx context.Context, req resource.SchemaR
 		Attributes: map[string]schema.Attribute{
 			"app_id": schema.StringAttribute{
 				MarkdownDescription: "The ID of the application to connect from",
-				Required:            true,
+				Optional:            true,
 				Validators: []validator.String{
 					validation.ValidUUID(),
 				},
 			},
 			"target_app_id": schema.StringAttribute{
 				MarkdownDescription: "The ID of the application to connect to",
-				Required:            true,
+				Optional:            true,
 				Validators: []validator.String{
 					validation.ValidUUID(),
 				},
 			},
 			"from_port": schema.Int64Attribute{
-				MarkdownDescription: "The ID of the application to connect to",
-				Required:            true,
+				MarkdownDescription: "The start of port range for the TCP and UDP protocols",
+				Optional:            true,
 				Validators: []validator.Int64{
-					int64validator.Between(-1, 65535),
+					int64validator.Between(1, 65535),
 				},
 			},
 			"to_port": schema.Int64Attribute{
-				MarkdownDescription: "The ID of the application to connect to",
-				Required:            true,
+				MarkdownDescription: "The end of port range for the TCP and UDP protocols",
+				Optional:            true,
 				Validators: []validator.Int64{
-					int64validator.Between(-1, 65535),
+					int64validator.Between(1, 65535),
 				},
 			},
 			"ip_protocol": schema.StringAttribute{
@@ -97,7 +97,7 @@ func (r *NetworkPolicyResource) Schema(ctx context.Context, req resource.SchemaR
 			},
 			"policies": schema.ListNestedAttribute{
 				MarkdownDescription: "Network policies to create",
-				Required:            false,
+				Optional:            true,
 				Validators: []validator.List{
 					listvalidator.SizeAtLeast(1),
 				},

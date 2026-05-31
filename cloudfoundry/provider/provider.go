@@ -323,7 +323,6 @@ func (p *CloudFoundryProvider) Resources(ctx context.Context) []func() resource.
 		NewCFUserResource,
 		NewServicePlanVisibilityResource,
 		NewNetworkPolicyResource,
-		NewNetworkPoliciesResource,
 	}
 }
 
