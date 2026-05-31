@@ -21,23 +21,23 @@ import (
 )
 
 var (
-	_ resource.Resource              = &NetworkPolicyResource{}
-	_ resource.ResourceWithConfigure = &NetworkPolicyResource{}
+	_ resource.Resource              = &NetworkPoliciesResource{}
+	_ resource.ResourceWithConfigure = &NetworkPoliciesResource{}
 )
 
-func NewNetworkPolicyResource() resource.Resource {
-	return &NetworkPolicyResource{}
+func NewNetworkPoliciesResource() resource.Resource {
+	return &NetworkPoliciesResource{}
 }
 
-type NetworkPolicyResource struct {
+type NetworkPoliciesResource struct {
 	client policy_client.ExternalPolicyClient
 }
 
-func (r *NetworkPolicyResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+func (r *NetworkPoliciesResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_network_policy"
 }
 
-func (r *NetworkPolicyResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+func (r *NetworkPoliciesResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	if req.ProviderData == nil {
 		return
 	}
@@ -53,74 +53,77 @@ func (r *NetworkPolicyResource) Configure(_ context.Context, req resource.Config
 	r.client = policy_client.NewExternal(lager.NewLogger("ExternalPolicyClient"), cfg.HTTPAuthClient(), cfg.ApiURL(""))
 }
 
-func (r *NetworkPolicyResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *NetworkPoliciesResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Provides a Cloud Foundry resource for managing Cloud Foundry Network Policies",
 
 		Attributes: map[string]schema.Attribute{
-			"app_id": schema.StringAttribute{
-				MarkdownDescription: "The ID of the application to connect from",
-				Required:            true,
-				Validators: []validator.String{
-					validation.ValidUUID(),
-				},
-			},
-			"target_app_id": schema.StringAttribute{
-				MarkdownDescription: "The ID of the application to connect to",
-				Required:            true,
-				Validators: []validator.String{
-					validation.ValidUUID(),
-				},
-			},
-			"from_port": schema.Int64Attribute{
-				MarkdownDescription: "The ID of the application to connect to",
-				Required:            true,
-				Validators: []validator.Int64{
-					int64validator.Between(-1, 65535),
-				},
-			},
-			"to_port": schema.Int64Attribute{
-				MarkdownDescription: "The ID of the application to connect to",
-				Required:            true,
-				Validators: []validator.Int64{
-					int64validator.Between(-1, 65535),
-				},
-			},
-			"ip_protocol": schema.StringAttribute{
-				MarkdownDescription: "One of 'udp' or 'tcp' identifying the allowed protocol for the access. Default is 'tcp'.",
-				Optional:            true,
-				Computed:            true,
-				Default:             stringdefault.StaticString("tcp"),
-				Validators: []validator.String{
-					stringvalidator.OneOf("tcp", "udp"),
-				},
-			},
 			"policies": schema.ListNestedAttribute{
 				MarkdownDescription: "Network policies to create",
-				Required:            false,
+				Required:            true,
 				Validators: []validator.List{
 					listvalidator.SizeAtLeast(1),
 				},
-				DeprecationMessage: "The policies argument is deprecated. Use the cloudfoundry_network_policies resource instead.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
-						"source_app": schema.StringAttribute{
+						"app_id": schema.StringAttribute{
 							MarkdownDescription: "The ID of the application to connect from",
 							Required:            true,
 							Validators: []validator.String{
 								validation.ValidUUID(),
 							},
 						},
-						"destination_app": schema.StringAttribute{
+						"target_app_id": schema.StringAttribute{
 							MarkdownDescription: "The ID of the application to connect to",
 							Required:            true,
 							Validators: []validator.String{
 								validation.ValidUUID(),
 							},
 						},
+						"from_port": schema.Int64Attribute{
+							MarkdownDescription: "The ID of the application to connect to",
+							Required:            true,
+							Validators: []validator.Int64{
+								int64validator.Between(-1, 65535),
+							},
+						},
+						"to_port": schema.Int64Attribute{
+							MarkdownDescription: "The ID of the application to connect to",
+							Required:            true,
+							Validators: []validator.Int64{
+								int64validator.Between(-1, 65535),
+							},
+						},
+						"ip_protocol": schema.StringAttribute{
+							MarkdownDescription: "One of 'udp' or 'tcp' identifying the allowed protocol for the access. Default is 'tcp'.",
+							Optional:            true,
+							Computed:            true,
+							Default:             stringdefault.StaticString("tcp"),
+							Validators: []validator.String{
+								stringvalidator.OneOf("tcp", "udp"),
+							},
+						},
+
+						"source_app": schema.StringAttribute{
+							MarkdownDescription: "The ID of the application to connect from",
+							DeprecationMessage:  "The source_app argument is deprecated. Use the app_id attribute instead",
+							Optional:            true,
+							Validators: []validator.String{
+								validation.ValidUUID(),
+							},
+						},
+						"destination_app": schema.StringAttribute{
+							MarkdownDescription: "The ID of the application to connect to",
+							DeprecationMessage:  "The destination_app argument is deprecated. Use the target_app_id attribute instead",
+							Optional:            true,
+							Validators: []validator.String{
+								validation.ValidUUID(),
+							},
+						},
 						"port": schema.StringAttribute{
 							MarkdownDescription: "Port (8080) or range of ports (8080-8085) for connection to destination app",
-							Required:            true,
+							Optional:            true,
+							DeprecationMessage:  "The port argument is deprecated. Use the from_port and to_port attributes instead",
 							Validators: []validator.String{
 								stringvalidator.Any(
 									stringvalidator.RegexMatches(
@@ -139,6 +142,7 @@ func (r *NetworkPolicyResource) Schema(ctx context.Context, req resource.SchemaR
 							Optional:            true,
 							Computed:            true,
 							Default:             stringdefault.StaticString("tcp"),
+							DeprecationMessage:  "The protocol argument is deprecated. Use the ip_protocol attribute instead",
 							Validators: []validator.String{
 								stringvalidator.OneOf("tcp", "udp"),
 							},
@@ -150,7 +154,7 @@ func (r *NetworkPolicyResource) Schema(ctx context.Context, req resource.SchemaR
 	}
 }
 
-func (r *NetworkPolicyResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+func (r *NetworkPoliciesResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan networkPoliciesType
 
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -176,7 +180,7 @@ func (r *NetworkPolicyResource) Create(ctx context.Context, req resource.CreateR
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-func (r *NetworkPolicyResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+func (r *NetworkPoliciesResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state networkPoliciesType
 
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -199,7 +203,7 @@ func (r *NetworkPolicyResource) Delete(ctx context.Context, req resource.DeleteR
 	}
 }
 
-func (r *NetworkPolicyResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+func (r *NetworkPoliciesResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var data networkPoliciesType
 
 	diags := req.State.Get(ctx, &data)
@@ -231,7 +235,7 @@ func (r *NetworkPolicyResource) Read(ctx context.Context, req resource.ReadReque
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
-func (r *NetworkPolicyResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+func (r *NetworkPoliciesResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, previousState networkPoliciesType
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &previousState)...)
