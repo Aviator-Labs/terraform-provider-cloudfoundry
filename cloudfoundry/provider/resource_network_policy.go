@@ -151,7 +151,7 @@ func (r *NetworkPolicyResource) Schema(ctx context.Context, req resource.SchemaR
 }
 
 func (r *NetworkPolicyResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var plan networkPoliciesType
+	var plan networkPolicyType
 
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
@@ -177,7 +177,7 @@ func (r *NetworkPolicyResource) Create(ctx context.Context, req resource.CreateR
 }
 
 func (r *NetworkPolicyResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	var state networkPoliciesType
+	var state networkPolicyType
 
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
@@ -200,7 +200,7 @@ func (r *NetworkPolicyResource) Delete(ctx context.Context, req resource.DeleteR
 }
 
 func (r *NetworkPolicyResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var data networkPoliciesType
+	var data networkPolicyType
 
 	diags := req.State.Get(ctx, &data)
 	resp.Diagnostics.Append(diags...)
@@ -209,13 +209,23 @@ func (r *NetworkPolicyResource) Read(ctx context.Context, req resource.ReadReque
 	}
 
 	idsMap := make(map[string]bool)
-	for _, p := range data.Policies {
-		idsMap[p.SourceApp.ValueString()] = true
-		idsMap[p.DestinationApp.ValueString()] = true
+	if !data.AppId.IsNull() && !data.AppId.IsUnknown() {
+		idsMap[data.AppId.ValueString()] = true
+		idsMap[data.TargetAppId.ValueString()] = true
+	} else {
+		for _, p := range data.Policies {
+			idsMap[p.SourceApp.ValueString()] = true
+			idsMap[p.DestinationApp.ValueString()] = true
+		}
 	}
+
 	ids := make([]string, 0, len(idsMap))
 	for k := range idsMap {
 		ids = append(ids, k)
+	}
+
+	if len(ids) == 0 {
+		return
 	}
 
 	policies, err := r.client.GetPoliciesByID("", ids...)
@@ -223,52 +233,72 @@ func (r *NetworkPolicyResource) Read(ctx context.Context, req resource.ReadReque
 		resp.Diagnostics.AddError(fmt.Sprintf("API Error Reading network_policy %v", ids), err.Error())
 		return
 	}
-	mappedPolicies := mapPolicyClientPoliciesToNetworkPoliciesSlice(policies)
 
-	data.Policies = lo.Intersect(mappedPolicies, data.Policies)
+	if !data.AppId.IsNull() && !data.AppId.IsUnknown() {
+		found := lo.Filter(policies, func(p policy_client.Policy, _ int) bool {
+			return p.Source.ID == data.AppId.ValueString() &&
+				p.Destination.ID == data.TargetAppId.ValueString() &&
+				p.Destination.Protocol == data.IPProtocol.ValueString() &&
+				p.Destination.Ports.Start == int(data.FromPort.ValueInt64()) &&
+				p.Destination.Ports.End == int(data.ToPort.ValueInt64())
+		})
+
+		if len(found) == 0 {
+			resp.State.RemoveResource(ctx)
+			return
+		}
+		data.Policies = nil
+	} else {
+		mappedPolicies := mapPolicyClientPoliciesToNetworkPoliciesSlice(policies)
+		data.Policies = lo.Intersect(mappedPolicies, data.Policies)
+
+		if len(data.Policies) == 0 {
+			resp.State.RemoveResource(ctx)
+			return
+		}
+	}
+
 	tflog.Trace(ctx, "read a network_policy resource")
-
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
 func (r *NetworkPolicyResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var plan, previousState networkPoliciesType
+	var plan, previousState networkPolicyType
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &previousState)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	remove, add := lo.Difference(previousState.Policies, plan.Policies)
+	oldPolicies, diags := previousState.mapToPolicyClientPolicies()
+	resp.Diagnostics.Append(diags...)
+	newPolicies, diags := plan.mapToPolicyClientPolicies()
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	remove, add := lo.Difference(oldPolicies, newPolicies)
 
 	if len(remove) > 0 {
-		policies, diags := remove.mapToPolicyClientPolicies()
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		if err := r.client.DeletePolicies("", policies); err != nil {
+		if err := r.client.DeletePolicies("", remove); err != nil {
 			resp.Diagnostics.AddError(
 				"API Error Deleting Policies",
-				"Could not remove Policies : "+err.Error(),
+				"Could not remove old Policies during update: "+err.Error(),
 			)
 			return
 		}
 	}
 	if len(add) > 0 {
-		policies, diags := add.mapToPolicyClientPolicies()
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		if err := r.client.AddPolicies("", policies); err != nil {
+		if err := r.client.AddPolicies("", add); err != nil {
 			resp.Diagnostics.AddError(
 				"API Error Creating Policies",
-				"Could not create Policies : "+err.Error(),
+				"Could not create new Policies during update: "+err.Error(),
 			)
 			return
 		}
 	}
+
 	tflog.Trace(ctx, "updated a network_policy resource")
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }

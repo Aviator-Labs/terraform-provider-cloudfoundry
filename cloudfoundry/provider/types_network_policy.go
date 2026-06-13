@@ -10,8 +10,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-type networkPoliciesType struct {
-	Policies networkPoliciesSlice `tfsdk:"policies"`
+type networkPolicyType struct {
+	Policies legacyNetworkPoliciesSlice `tfsdk:"policies"`
 
 	AppId       types.String `tfsdk:"app_id"`
 	TargetAppId types.String `tfsdk:"target_app_id"`
@@ -20,20 +20,43 @@ type networkPoliciesType struct {
 	IPProtocol  types.String `tfsdk:"ip_protocol"`
 }
 
-type networkPoliciesSlice []networkPolicyType
+type legacyNetworkPoliciesSlice []legacyNetworkPolicyType
 
-type networkPolicyType struct {
+type legacyNetworkPolicyType struct {
 	SourceApp      types.String `tfsdk:"source_app"`
 	DestinationApp types.String `tfsdk:"destination_app"`
 	Port           types.String `tfsdk:"port"`
 	Protocol       types.String `tfsdk:"protocol"`
 }
 
-func (data *networkPoliciesType) mapToPolicyClientPolicies() ([]policy_client.Policy, diag.Diagnostics) {
-	return data.Policies.mapToPolicyClientPolicies()
+func (data *networkPolicyType) mapToPolicyClientPolicies() ([]policy_client.Policy, diag.Diagnostics) {
+	var diags diag.Diagnostics
+
+	if !data.AppId.IsNull() && !data.AppId.IsUnknown() {
+		mappedPolicy := policy_client.Policy{
+			Source: policy_client.Source{
+				ID: data.AppId.ValueString(),
+			},
+			Destination: policy_client.Destination{
+				ID:       data.TargetAppId.ValueString(),
+				Protocol: data.IPProtocol.ValueString(),
+				Ports: policy_client.Ports{
+					Start: int(data.FromPort.ValueInt64()),
+					End:   int(data.ToPort.ValueInt64()),
+				},
+			},
+		}
+		return []policy_client.Policy{mappedPolicy}, diags
+	}
+
+	if len(data.Policies) > 0 {
+		return data.Policies.mapToLegacyPolicyClientPolicies()
+	}
+
+	return nil, diags
 }
 
-func (policies networkPoliciesSlice) mapToPolicyClientPolicies() ([]policy_client.Policy, diag.Diagnostics) {
+func (policies legacyNetworkPoliciesSlice) mapToLegacyPolicyClientPolicies() ([]policy_client.Policy, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	var mapped []policy_client.Policy
 
@@ -79,15 +102,15 @@ func portRangeParse(portRange string) (start int, end int, err error) {
 	return start, end, nil
 }
 
-func mapPolicyClientPoliciesToNetworkPoliciesSlice(policies []policy_client.Policy) networkPoliciesSlice {
-	var mapped networkPoliciesSlice
+func mapPolicyClientPoliciesToNetworkPoliciesSlice(policies []policy_client.Policy) legacyNetworkPoliciesSlice {
+	var mapped legacyNetworkPoliciesSlice
 
 	for _, p := range policies {
 		port := strconv.Itoa(p.Destination.Ports.Start)
 		if p.Destination.Ports.Start != p.Destination.Ports.End {
 			port = fmt.Sprintf("%d-%d", p.Destination.Ports.Start, p.Destination.Ports.End)
 		}
-		mapped = append(mapped, networkPolicyType{
+		mapped = append(mapped, legacyNetworkPolicyType{
 			SourceApp:      types.StringValue(p.Source.ID),
 			DestinationApp: types.StringValue(p.Destination.ID),
 			Protocol:       types.StringValue(p.Destination.Protocol),

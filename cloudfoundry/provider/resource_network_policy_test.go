@@ -10,28 +10,52 @@ import (
 )
 
 type NetworkPolicyPtr struct {
-	HclObjectName    string
+	HclObjectName string
+
+	// Legacy layout fields
 	SourceAppId      string
 	DestinationAppId string
 	PortStr          string
 	Protocol         *string
+
+	// New flat layout fields
+	IsFlatLayout bool
+	AppId        string
+	TargetAppId  string
+	FromPort     int
+	ToPort       int
+	IPProtocol   *string
 }
 
 func hclNetworkPolicy(npp *NetworkPolicyPtr) string {
 	if npp != nil {
-		s := `
-		resource "cloudfoundry_network_policy" "{{.HclObjectName}}" {
-			policies = [
-				{
-					source_app = "{{.SourceAppId}}"
-					destination_app = "{{.DestinationAppId}}"
-					port = "{{.PortStr}}"
-					{{- if .Protocol}}
-					protocol = "{{.Protocol}}"
-					{{- end -}}
-				}
-			]
-		}`
+		var s string
+		if npp.IsFlatLayout {
+			s = `
+			resource "cloudfoundry_network_policy" "{{.HclObjectName}}" {
+				app_id        = "{{.AppId}}"
+				target_app_id = "{{.TargetAppId}}"
+				from_port     = {{.FromPort}}
+				to_port       = {{.ToPort}}
+				{{- if .IPProtocol}}
+				ip_protocol   = "{{.IPProtocol}}"
+				{{- end}}
+			}`
+		} else {
+			s = `
+			resource "cloudfoundry_network_policy" "{{.HclObjectName}}" {
+				policies = [
+					{
+						source_app      = "{{.SourceAppId}}"
+						destination_app = "{{.DestinationAppId}}"
+						port            = "{{.PortStr}}"
+						{{- if .Protocol}}
+						protocol        = "{{.Protocol}}"
+						{{- end -}}
+					}
+				]
+			}`
+		}
 		tmpl, err := template.New("resource_network_policy").Parse(s)
 		if err != nil {
 			panic(err)
@@ -49,7 +73,7 @@ func hclNetworkPolicy(npp *NetworkPolicyPtr) string {
 func TestNetworkPolicyResource_Configure(t *testing.T) {
 	t.Parallel()
 
-	t.Run("happy path - create/read/update/delete policy", func(t *testing.T) {
+	t.Run("happy path - create/read/update/delete legacy nested policy", func(t *testing.T) {
 		resourceName := "cloudfoundry_network_policy.np"
 		cfg := getCFHomeConf()
 		rec := cfg.SetupVCR(t, "fixtures/resource_network_policy_crud")
@@ -84,6 +108,39 @@ func TestNetworkPolicyResource_Configure(t *testing.T) {
 						resource.TestCheckResourceAttr(resourceName, "policies.#", "1"),
 						resource.TestCheckResourceAttr(resourceName, "policies.0.protocol", "udp"),
 						resource.TestCheckResourceAttr(resourceName, "policies.0.port", "61443"),
+					),
+				},
+			},
+		})
+	})
+
+	t.Run("happy path - create/read/update/delete modern flat policy", func(t *testing.T) {
+		resourceName := "cloudfoundry_network_policy.np_flat"
+		cfg := getCFHomeConf()
+		// Note: This may require re-recording or creating a separate fixture file
+		// if the API client structural mutations differ drastically from the original CRUD payload strings.
+		rec := cfg.SetupVCR(t, "fixtures/resource_network_policy_flat_crud")
+		defer stopQuietly(rec)
+
+		resource.Test(t, resource.TestCase{
+			IsUnitTest:               true,
+			ProtoV6ProviderFactories: getProviders(rec.GetDefaultClient()),
+			Steps: []resource.TestStep{
+				{
+					Config: hclProvider(nil) + hclNetworkPolicy(&NetworkPolicyPtr{
+						IsFlatLayout:  true,
+						HclObjectName: "np_flat",
+						AppId:         "d7574c2b-6a04-4f8c-a629-92e9cd08b026",
+						TargetAppId:   "a2ec5785-5c64-455e-a768-7a92215848c2",
+						FromPort:      8080,
+						ToPort:        8085,
+					}),
+					Check: resource.ComposeAggregateTestCheckFunc(
+						resource.TestCheckResourceAttr(resourceName, "app_id", "d7574c2b-6a04-4f8c-a629-92e9cd08b026"),
+						resource.TestCheckResourceAttr(resourceName, "target_app_id", "a2ec5785-5c64-455e-a768-7a92215848c2"),
+						resource.TestCheckResourceAttr(resourceName, "from_port", "8080"),
+						resource.TestCheckResourceAttr(resourceName, "to_port", "8085"),
+						resource.TestCheckResourceAttr(resourceName, "ip_protocol", "tcp"), // tests the schema default validation logic
 					),
 				},
 			},
